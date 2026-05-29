@@ -1,5 +1,8 @@
 # ⚡ Autonomous Financial Analyst — a Hierarchical Multi-Agent System
 
+### 🚀 [**Live demo →** financial-analyst-agent.onrender.com](https://financial-analyst-agent.onrender.com)
+<sub>(free tier — may take ~30-50s to wake on first visit)</sub>
+
 A **supervisor agent** orchestrates a team of six specialized agents to research any
 publicly traded stock and produce a **risk-scored investment memo grounded in the
 company's real SEC 10-K** — autonomously, with a live, streamed view of every agent's
