@@ -182,17 +182,28 @@ def _try_fmp(ticker: str) -> Dict[str, Any] | None:
         change, vol = info.get("changesPercentage"), None
         history = _synthetic(ticker)["price_history"]
 
+    # ---- fundamentals (P/E, profit margin) from the ratios endpoint (best-effort) ----
+    pe, margin = info.get("pe"), None
+    try:
+        r = _fmp_get(f"https://financialmodelingprep.com/stable/ratios-ttm?symbol={ticker}&apikey={key}")
+        row = r[0] if isinstance(r, list) and r else r
+        if isinstance(row, dict):
+            pe = row.get("priceToEarningsRatioTTM", pe)
+            margin = row.get("netProfitMarginTTM")
+    except Exception:
+        pass
+
     return {
         "source": "fmp",
         "ticker": ticker.upper(),
         "price": info.get("price"),
         "change_pct_1m": change,
-        "pe_ratio": info.get("pe"),
+        "pe_ratio": round(pe, 2) if isinstance(pe, (int, float)) else pe,
         "market_cap": info.get("marketCap"),
         "beta": None,
         "volatility_30d": vol,
         "revenue_growth_yoy": None,
-        "profit_margin": None,
+        "profit_margin": round(margin, 4) if isinstance(margin, (int, float)) else margin,
         "price_history": history,
     }
 
