@@ -3,12 +3,24 @@ and degrades to deterministic synthetic data so the demo always produces output.
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict
+import math
+from typing import Any, Dict, List
 
 
 def _seed(ticker: str) -> float:
     h = int(hashlib.sha256(ticker.upper().encode()).hexdigest(), 16)
     return (h % 1000) / 10.0  # stable pseudo-value per ticker
+
+
+def _synthetic_series(ticker: str, base: float, points: int = 30) -> List[Dict[str, Any]]:
+    """Deterministic but realistic-looking price walk for charting."""
+    series, price = [], base * 0.9
+    for i in range(points):
+        wiggle = math.sin((i + _seed(ticker)) / 3.0) * base * 0.02
+        drift = (i / points) * base * 0.1
+        price = round(base * 0.9 + drift + wiggle, 2)
+        series.append({"t": i, "close": price})
+    return series
 
 
 def _synthetic(ticker: str) -> Dict[str, Any]:
@@ -24,6 +36,7 @@ def _synthetic(ticker: str) -> Dict[str, Any]:
         "volatility_30d": round(0.15 + (_seed(ticker) % 30) / 100, 3),
         "revenue_growth_yoy": round((_seed(ticker) % 30) - 5, 2),
         "profit_margin": round((_seed(ticker) % 25) / 100, 3),
+        "price_history": _synthetic_series(ticker, base),
     }
 
 
@@ -37,10 +50,13 @@ def get_market_data(ticker: str) -> Dict[str, Any]:
             raise ValueError("empty info")
         hist = t.history(period="1mo")
         change = 0.0
+        history: List[Dict[str, Any]] = []
         if len(hist) > 1:
             change = round(
                 (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100, 2
             )
+            closes = hist["Close"].tolist()
+            history = [{"t": i, "close": round(c, 2)} for i, c in enumerate(closes)]
         return {
             "source": "yfinance",
             "ticker": ticker.upper(),
@@ -52,6 +68,7 @@ def get_market_data(ticker: str) -> Dict[str, Any]:
             "volatility_30d": round(hist["Close"].pct_change().std(), 4) if len(hist) > 1 else None,
             "revenue_growth_yoy": info.get("revenueGrowth"),
             "profit_margin": info.get("profitMargins"),
+            "price_history": history or _synthetic(ticker)["price_history"],
         }
     except Exception:
         return _synthetic(ticker)

@@ -9,3 +9,6 @@ docs/
 evals/
 .claude/
 *.log
+frontend/
+frontend-react/node_modules/
+frontend-react/dist/

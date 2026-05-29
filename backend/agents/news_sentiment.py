@@ -1,10 +1,23 @@
 """News & Sentiment Agent — pulls headlines and scores sentiment with the LLM."""
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict
 
 from .. import llm
 from ..tools import get_news
+
+
+def _extract_score(text: str) -> float:
+    m = re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", text.split("sentiment")[-1]) if "sentiment" in text.lower() else []
+    for tok in m:
+        try:
+            v = float(tok)
+            if -1.0 <= v <= 1.0:
+                return round(v, 2)
+        except ValueError:
+            continue
+    return 0.0
 
 NAME = "news_sentiment"
 
@@ -27,4 +40,6 @@ def run(state: Dict[str, Any], emit: Callable[[str, str], None]) -> Dict[str, An
     emit(NAME, f"Scoring sentiment over {len(news['headlines'])} headlines…")
     user = "Headlines:\n" + "\n".join(f"- {h}" for h in news["headlines"])
     summary = llm.complete(SYSTEM, user, max_tokens=400)
-    return {"news": {"headlines": news["headlines"], "summary": summary}}
+    score = _extract_score(summary)
+    emit(NAME, f"Net sentiment score: {score:+.2f}")
+    return {"news": {"headlines": news["headlines"], "summary": summary, "score": score}}

@@ -1,5 +1,5 @@
 """FastAPI server. Streams the multi-agent run as Server-Sent Events so the
-frontend can render a live agent trace, and serves the single-file UI."""
+React frontend can render a live agent trace, and serves the built SPA."""
 from __future__ import annotations
 
 import json
@@ -7,17 +7,15 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import graph, llm
 
-app = FastAPI(title="Autonomous Financial Analyst", version="1.0.0")
+app = FastAPI(title="Autonomous Financial Analyst", version="2.0.0")
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
-FRONTEND = FRONTEND_DIR / "index.html"
-
-app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+ROOT = Path(__file__).resolve().parent.parent
+DIST = ROOT / "frontend-react" / "dist"
 
 
 @app.get("/api/health")
@@ -43,9 +41,18 @@ def analyze(ticker: str):
     )
 
 
-@app.get("/")
-def index():
-    return FileResponse(FRONTEND)
+# Serve the built React SPA (index.html + hashed assets + public files like
+# /architecture.svg). Mounted last so /api routes take precedence. html=True
+# serves index.html at "/" and falls back to it for client-side routes.
+if DIST.exists():
+    app.mount("/", StaticFiles(directory=str(DIST), html=True), name="spa")
+else:
+    @app.get("/")
+    def _missing():
+        return JSONResponse(
+            {"error": "frontend not built", "hint": "run `npm run build` in frontend-react/"},
+            status_code=503,
+        )
 
 
 if __name__ == "__main__":

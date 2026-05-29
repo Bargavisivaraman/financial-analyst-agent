@@ -26,8 +26,9 @@ reasoning and tool calls.
 - **Risk agent with veto authority.** The Risk Manager blends a *deterministic* quant score
   (beta, volatility, valuation) with LLM judgment and can **veto** a recommendation, which the
   Report Writer is forced to honor.
-- **Live agent-trace UI.** Server-Sent Events stream every step — including each tool the LLM
-  chooses — to a single-file frontend so you watch the agents collaborate in real time.
+- **Polished React UI.** A React + TypeScript + Tailwind frontend renders an animated agent-graph
+  (nodes light up as each agent runs), a live SSE trace, a price chart, a radial risk gauge, a
+  sentiment meter, and the cited memo — every step streaming in real time.
 - **Eval harness.** `evals/run_eval.py` reports coverage, latency, and veto rate over a ticker basket.
 - **Runs with zero credentials.** No key? Deterministic **MOCK mode** (mock LLM + synthetic data)
   keeps everything working end-to-end. Add a free **Groq** key for **LIVE mode**.
@@ -51,13 +52,17 @@ is trivial since the node/edge model is identical.
 
 ## Tech stack
 
-Python · FastAPI · Server-Sent Events · **Groq** (free, OpenAI-compatible) / Claude · LLM tool-calling ·
-from-scratch TF-IDF RAG · SEC EDGAR · yfinance · vanilla-JS UI · Docker
+**Backend:** Python · FastAPI · Server-Sent Events · **Groq** (free, OpenAI-compatible) / Claude ·
+LLM tool-calling · from-scratch TF-IDF RAG · SEC EDGAR · yfinance
+**Frontend:** React · TypeScript · Tailwind CSS · Recharts · Framer Motion
+**Infra:** Docker (multi-stage build) · Render
 
 ## Quickstart
 
 ```bash
 cd financial-analyst-agent
+
+# 1. backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 
@@ -65,7 +70,17 @@ pip install -r backend/requirements.txt
 cp .env.example .env            # paste GROQ_API_KEY=...
 set -a && . ./.env && set +a    # load it
 
+# 2. build the frontend (served by FastAPI in production)
+cd frontend-react && npm install && npm run build && cd ..
+
+# 3. run
 python -m backend.server        # open http://localhost:8000
+```
+
+**Frontend dev mode** (hot reload, proxies API to :8000):
+
+```bash
+cd frontend-react && npm run dev      # http://localhost:5173
 ```
 
 Run the eval harness:
@@ -91,18 +106,21 @@ backend/
   rag.py         from-scratch TF-IDF chunker + retriever (no heavy deps)
   graph.py       supervisor / orchestrator (state graph + reflection loop)
   llm.py         Groq/Claude wrapper + tool-calling loop + deterministic mock fallback
-  server.py      FastAPI + SSE streaming
-frontend/
-  index.html     live agent-trace UI (single file, no build step)
+  server.py      FastAPI + SSE streaming + serves the built SPA
+frontend-react/
+  src/components/  Nav, Hero, Analyzer, AgentGraph, TracePanel, RiskGauge, PriceChart,
+                   SentimentMeter, Filings, Memo, HowItWorks, Architecture, Footer
+  src/api.ts       typed SSE client + React hooks
 evals/
   run_eval.py    multi-ticker coverage / latency / veto-rate report
-Dockerfile · render.yaml · Procfile   deployment
+Dockerfile · render.yaml · Procfile   deployment (multi-stage: node build + python)
 ```
 
 ## Resume bullet
 
-> Built a hierarchical multi-agent system (supervisor + 6 specialized agents) for autonomous equity
-> research: implemented **real LLM tool-calling**, **RAG over SEC 10-K filings** (from-scratch TF-IDF
-> retriever) for source-grounded analysis, a **risk-veto** mechanism, and a reflection loop; streamed
-> the live agent trace to a web UI via SSE, containerized with Docker, and added an eval harness
-> measuring coverage, latency, and veto rate.
+> Built a full-stack hierarchical multi-agent system (supervisor + 6 specialized agents) for
+> autonomous equity research: implemented **real LLM tool-calling**, **RAG over SEC 10-K filings**
+> (from-scratch TF-IDF retriever) for source-grounded analysis, a **risk-veto** mechanism, and a
+> reflection loop; built a **React + TypeScript** UI with an animated agent-graph and live SSE
+> streaming, containerized with a multi-stage **Docker** build, deployed on Render, and added an
+> eval harness measuring coverage, latency, and veto rate.
