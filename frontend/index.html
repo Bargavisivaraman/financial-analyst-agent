@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Autonomous Financial Analyst · Multi-Agent</title>
+<style>
+  :root{
+    --bg:#0a0e17; --panel:#121826; --panel2:#0f1420; --border:#1f2937;
+    --txt:#e5e9f0; --muted:#8b95a7; --accent:#5eead4; --accent2:#818cf8;
+    --green:#34d399; --amber:#fbbf24; --red:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;
+    background:radial-gradient(1200px 600px at 80% -10%,#13203a 0%,var(--bg) 60%);
+    color:var(--txt);min-height:100vh}
+  header{padding:28px 32px 8px}
+  h1{margin:0;font-size:22px;letter-spacing:.3px}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px;margin-top:6px}
+  .mode{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:20px;font-size:11px;
+    border:1px solid var(--border);color:var(--muted)}
+  .wrap{display:grid;grid-template-columns:340px 1fr;gap:20px;padding:20px 32px 40px}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px}
+  .controls{display:flex;gap:10px;margin-bottom:18px}
+  input{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--txt);
+    padding:12px 14px;border-radius:10px;font-size:15px;text-transform:uppercase;font-family:inherit}
+  button{background:linear-gradient(135deg,var(--accent2),var(--accent));color:#06121a;border:0;
+    padding:12px 18px;border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .agents h3,.trace h3,.memo h3{margin:0 0 12px;font-size:12px;text-transform:uppercase;
+    letter-spacing:1.5px;color:var(--muted)}
+  .agent{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;
+    border:1px solid var(--border);margin-bottom:9px;background:var(--panel2);transition:.25s}
+  .agent.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 18px rgba(94,234,212,.15)}
+  .agent.done{border-color:#1f3a34}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--border);flex:none}
+  .agent.active .dot{background:var(--accent);animation:pulse 1s infinite}
+  .agent.done .dot{background:var(--green)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .agent .nm{font-size:13px}.agent .role{font-size:11px;color:var(--muted)}
+  .trace{height:340px;overflow:auto}
+  .line{font-size:12.5px;padding:5px 0;border-bottom:1px dashed #18202e;display:flex;gap:10px}
+  .who{color:var(--accent2);min-width:120px}
+  .who.supervisor{color:var(--accent)}
+  .memo{margin-top:20px}
+  .memo .body{background:var(--panel2);border:1px solid var(--border);border-radius:10px;
+    padding:18px;line-height:1.6;font-size:14px;white-space:normal}
+  .memo h2{font-size:16px;margin:.2em 0}.memo strong{color:var(--accent)}
+  .gauge{display:flex;align-items:center;gap:14px;margin:14px 0}
+  .bar{flex:1;height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;border:1px solid var(--border)}
+  .fill{height:100%;width:0;transition:width .6s}
+  .badge{padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700}
+  .flags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .flag{font-size:11px;padding:3px 9px;border-radius:6px;background:#1a2230;color:var(--amber);border:1px solid #2a3346}
+  .veto{color:var(--red);font-weight:700}
+  .empty{color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+  <header>
+    <h1>⚡ Autonomous <span class="accent">Financial Analyst</span> <span class="mode" id="mode">checking…</span></h1>
+    <div class="sub">A hierarchical multi-agent system — Supervisor orchestrates Market · Fundamental · News · Risk · Report agents.</div>
+  </header>
+
+  <div class="wrap">
+    <div>
+      <div class="card">
+        <div class="controls">
+          <input id="ticker" placeholder="ticker e.g. AAPL" value="AAPL" />
+          <button id="run">Analyze</button>
+        </div>
+        <div class="agents">
+          <h3>Agent Team</h3>
+          <div id="agents"></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card trace">
+        <h3>Live Agent Trace</h3>
+        <div id="trace"><div class="empty">Enter a ticker and hit Analyze to watch the agents collaborate in real time.</div></div>
+      </div>
+
+      <div class="card memo" id="memoCard" style="display:none">
+        <h3>Risk &amp; Memo</h3>
+        <div id="risk"></div>
+        <div class="body" id="memo"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const AGENTS = [
+  ["supervisor","Supervisor","orchestrates & routes"],
+  ["market_data","Market Data","live price / valuation"],
+  ["fundamental","Fundamental Analyst","growth & margins"],
+  ["news_sentiment","News & Sentiment","headline scoring"],
+  ["risk_manager","Risk Manager","risk score · veto"],
+  ["report_writer","Report Writer","final memo"],
+];
+const agentsEl=document.getElementById('agents');
+const traceEl=document.getElementById('trace');
+const runBtn=document.getElementById('run');
+
+function renderAgents(){
+  agentsEl.innerHTML='';
+  AGENTS.forEach(([id,nm,role])=>{
+    agentsEl.insertAdjacentHTML('beforeend',
+      `<div class="agent" id="ag-${id}"><span class="dot"></span><div><div class="nm">${nm}</div><div class="role">${role}</div></div></div>`);
+  });
+}
+renderAgents();
+
+fetch('/api/health').then(r=>r.json()).then(h=>{
+  document.getElementById('mode').textContent = h.llm_mode==='live' ? 'LIVE · '+h.model : 'MOCK mode';
+});
+
+function setActive(id){
+  document.querySelectorAll('.agent').forEach(a=>a.classList.remove('active'));
+  const el=document.getElementById('ag-'+id);
+  if(el){ el.classList.add('active'); document.querySelectorAll('.agent').forEach(a=>{ if(a===el) return; }); }
+}
+function markDone(id){const el=document.getElementById('ag-'+id);if(el){el.classList.remove('active');el.classList.add('done');}}
+
+function mdToHtml(md){
+  return md
+    .replace(/^## (.*$)/gim,'<h2>$1</h2>')
+    .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+    .replace(/_(.*?)_/g,'<em>$1</em>')
+    .replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>');
+}
+
+function showRisk(r){
+  const colors={Low:'var(--green)',Moderate:'var(--amber)',High:'#fb923c',Severe:'var(--red)'};
+  const c=colors[r.risk_band]||'var(--amber)';
+  const flags=(r.flags||[]).map(f=>`<span class="flag">${f}</span>`).join('');
+  document.getElementById('risk').innerHTML=`
+    <div class="gauge">
+      <span class="badge" style="background:${c}22;color:${c};border:1px solid ${c}">${r.risk_band}</span>
+      <div class="bar"><div class="fill" style="background:${c}"></div></div>
+      <strong>${r.risk_score}/100</strong>
+    </div>
+    ${r.veto?'<div class="veto">⛔ RISK VETO ISSUED</div>':''}
+    <div class="flags">${flags}</div>`;
+  requestAnimationFrame(()=>{document.querySelector('.fill').style.width=r.risk_score+'%';});
+}
+
+let started=false;
+runBtn.onclick=()=>{
+  const ticker=document.getElementById('ticker').value.trim()||'AAPL';
+  if(started) return;
+  started=true; runBtn.disabled=true;
+  renderAgents();
+  traceEl.innerHTML='';
+  document.getElementById('memoCard').style.display='none';
+
+  const es=new EventSource('/api/analyze?ticker='+encodeURIComponent(ticker));
+  es.onmessage=(e)=>{
+    const ev=JSON.parse(e.data);
+    if(ev.type==='trace'){
+      setActive(ev.agent);
+      AGENTS.forEach(([id])=>{ if(id===ev.agent) return; });
+      // mark previous non-supervisor agents done when supervisor dispatches next
+      traceEl.insertAdjacentHTML('beforeend',
+        `<div class="line"><span class="who ${ev.agent==='supervisor'?'supervisor':''}">${ev.agent}</span><span>${ev.message}</span></div>`);
+      traceEl.scrollTop=traceEl.scrollHeight;
+      if(ev.agent!=='supervisor' && ev.message.toLowerCase().includes('complete')) markDone(ev.agent);
+      if(ev.message.includes('Got')) markDone('market_data');
+      if(ev.message.toLowerCase().includes('cleared')||ev.message.toLowerCase().includes('veto')) markDone('risk_manager');
+      if(ev.message.toLowerCase().includes('ready')) markDone('report_writer');
+    } else if(ev.type==='result'){
+      AGENTS.forEach(([id])=>markDone(id));
+      document.getElementById('memoCard').style.display='block';
+      if(ev.risk) showRisk(ev.risk);
+      document.getElementById('memo').innerHTML=mdToHtml(ev.memo||'');
+    } else if(ev.type==='done'){
+      es.close(); started=false; runBtn.disabled=false;
+    }
+  };
+  es.onerror=()=>{ es.close(); started=false; runBtn.disabled=false; };
+};
+</script>
+</body>
+</html>
