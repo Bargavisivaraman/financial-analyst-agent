@@ -8,12 +8,16 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import graph, llm
 
 app = FastAPI(title="Autonomous Financial Analyst", version="1.0.0")
 
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+FRONTEND = FRONTEND_DIR / "index.html"
+
+app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 
 @app.get("/api/health")

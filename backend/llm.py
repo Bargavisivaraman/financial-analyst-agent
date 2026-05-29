@@ -92,9 +92,22 @@ def complete_with_tools(system, user, tools, dispatch, max_rounds=4, emit=None) 
     if not supports_tools():
         raise RuntimeError("tool-calling unsupported on this backend")
 
+    def _create(**kw):
+        # Llama-on-Groq intermittently emits a malformed tool call (tool_use_failed);
+        # it's transient, so retry a couple times before giving up.
+        last = None
+        for attempt in range(3):
+            try:
+                return _client.chat.completions.create(**kw)
+            except Exception as e:  # noqa: BLE001
+                last = e
+                if "tool_use_failed" not in str(e) and "400" not in str(e):
+                    raise
+        raise last
+
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     for _ in range(max_rounds):
-        resp = _client.chat.completions.create(
+        resp = _create(
             model=_model, messages=messages, tools=tools, tool_choice="auto", max_tokens=800
         )
         msg = resp.choices[0].message
@@ -104,7 +117,7 @@ def complete_with_tools(system, user, tools, dispatch, max_rounds=4, emit=None) 
         messages.append(
             {
                 "role": "assistant",
-                "content": msg.content or "",
+                "content": msg.content,  # null is valid (and expected) alongside tool_calls
                 "tool_calls": [
                     {"id": tc.id, "type": "function",
                      "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
@@ -124,7 +137,7 @@ def complete_with_tools(system, user, tools, dispatch, max_rounds=4, emit=None) 
                 {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)[:4000]}
             )
 
-    final = _client.chat.completions.create(model=_model, messages=messages, max_tokens=800)
+    final = _create(model=_model, messages=messages, max_tokens=800)
     return (final.choices[0].message.content or "").strip()
 
 
