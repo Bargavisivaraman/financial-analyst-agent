@@ -1,23 +1,48 @@
-"""LLM layer. Uses Claude via the Anthropic SDK when ANTHROPIC_API_KEY is set,
-otherwise falls back to a deterministic mock so the whole system runs end-to-end
-without any keys (great for demos and CI)."""
+"""LLM layer with pluggable backends.
+
+Backend priority (first one with a key wins):
+  1. Groq        — free, fast, OpenAI-compatible   (GROQ_API_KEY)
+  2. Anthropic   — Claude                            (ANTHROPIC_API_KEY)
+  3. Mock        — deterministic, no key needed       (always available)
+
+The rest of the app is provider-agnostic; it only calls `complete()`.
+"""
 from __future__ import annotations
 
 import json
 import os
-from typing import Optional
 
-MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-_HAS_KEY = bool(os.getenv("ANTHROPIC_API_KEY"))
-
+# ---- backend selection -----------------------------------------------------
+_provider = "mock"
+_model = "deterministic-mock"
 _client = None
-if _HAS_KEY:
+
+_GROQ_KEY = os.getenv("GROQ_API_KEY")
+_ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
+
+if _GROQ_KEY:
+    try:
+        from openai import OpenAI  # OpenAI SDK speaks to Groq's compatible endpoint
+
+        _client = OpenAI(api_key=_GROQ_KEY, base_url="https://api.groq.com/openai/v1")
+        _model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        _provider = "groq"
+    except Exception:
+        _client = None
+
+elif _ANTHROPIC_KEY:
     try:
         from anthropic import Anthropic
 
         _client = Anthropic()
-    except Exception:  # SDK missing or import error -> degrade to mock
+        _model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        _provider = "anthropic"
+    except Exception:
         _client = None
+
+# public, read by server /api/health
+MODEL = _model
+PROVIDER = _provider
 
 
 def live_mode() -> bool:
@@ -29,8 +54,21 @@ def complete(system: str, user: str, max_tokens: int = 1024, json_mode: bool = F
     if _client is None:
         return _mock(system, user, json_mode)
 
+    if _provider == "groq":
+        resp = _client.chat.completions.create(
+            model=_model,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            **({"response_format": {"type": "json_object"}} if json_mode else {}),
+        )
+        return (resp.choices[0].message.content or "").strip()
+
+    # anthropic
     msg = _client.messages.create(
-        model=MODEL,
+        model=_model,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
@@ -71,7 +109,6 @@ def _mock(system: str, user: str, json_mode: bool) -> str:
             "The company shows healthy fundamentals and constructive news flow, balanced by a "
             "premium valuation. Suitable as a core holding; add on pullbacks below fair value.\n"
         )
-    # supervisor / default
     return (
         "Plan: gather market data, analyze fundamentals, assess news sentiment, run a risk "
         "check, then synthesize a memo. All sub-agents report sufficient confidence."

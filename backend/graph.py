@@ -35,7 +35,7 @@ def run_analysis(ticker: str) -> Iterator[Dict[str, Any]]:
 
     state: Dict[str, Any] = {"ticker": ticker.upper()}
 
-    mode = "LIVE (Claude)" if llm.live_mode() else "MOCK (no API key)"
+    mode = f"LIVE ({llm.PROVIDER}:{llm.MODEL})" if llm.live_mode() else "MOCK (no API key)"
     emit(SUPERVISOR, f"Received request for {state['ticker']}. LLM mode: {mode}.")
     emit(SUPERVISOR, "Planning: market → fundamental → news → risk → report.")
     yield from _flush(events)

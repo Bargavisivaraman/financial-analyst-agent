@@ -18,7 +18,12 @@ FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok", "llm_mode": "live" if llm.live_mode() else "mock", "model": llm.MODEL}
+    return {
+        "status": "ok",
+        "llm_mode": "live" if llm.live_mode() else "mock",
+        "provider": llm.PROVIDER,
+        "model": llm.MODEL,
+    }
 
 
 @app.get("/api/analyze")

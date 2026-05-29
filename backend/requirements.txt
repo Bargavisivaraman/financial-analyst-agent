@@ -1,4 +1,5 @@
 fastapi>=0.110
 uvicorn[standard]>=0.27
-anthropic>=0.39
+openai>=1.40          # OpenAI-compatible client used for Groq (free) backend
+anthropic>=0.39       # optional Claude backend
 yfinance>=0.2.40
