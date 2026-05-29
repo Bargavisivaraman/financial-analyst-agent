@@ -122,43 +122,79 @@ def _try_yahoo_chart(ticker: str) -> Dict[str, Any] | None:
         return None
 
 
-def _try_fmp(ticker: str) -> Dict[str, Any] | None:
-    """Full real data (price + fundamentals) from Financial Modeling Prep. Requires a
-    free FMP_API_KEY (https://site.financialmodelingprep.com). Works from cloud IPs."""
-    key = os.getenv("FMP_API_KEY")
-    if not key:
-        return None
+def _fmp_get(url: str):
     import json
     import urllib.request
 
-    base = "https://financialmodelingprep.com/api/v3"
-    try:
-        q = json.loads(urllib.request.urlopen(f"{base}/quote/{ticker}?apikey={key}", timeout=8).read())
-        if not q:
-            return None
-        info = q[0]
-        hist_raw = json.loads(
-            urllib.request.urlopen(
-                f"{base}/historical-price-full/{ticker}?serietype=line&timeseries=30&apikey={key}", timeout=8
-            ).read()
-        )
-        closes = [p["close"] for p in reversed(hist_raw.get("historical", []))]
-        change, vol = _stats_from_closes(closes) if len(closes) >= 5 else (info.get("changesPercentage"), None)
-        return {
-            "source": "fmp",
-            "ticker": ticker.upper(),
-            "price": info.get("price"),
-            "change_pct_1m": change,
-            "pe_ratio": info.get("pe"),
-            "market_cap": info.get("marketCap"),
-            "beta": None,
-            "volatility_30d": vol,
-            "revenue_growth_yoy": None,
-            "profit_margin": None,
-            "price_history": [{"t": i, "close": round(c, 2)} for i, c in enumerate(closes)] or _synthetic(ticker)["price_history"],
-        }
-    except Exception:
+    return json.loads(urllib.request.urlopen(url, timeout=8).read())
+
+
+def _try_fmp(ticker: str) -> Dict[str, Any] | None:
+    """Full real data (price + fundamentals) from Financial Modeling Prep. Requires a
+    free FMP_API_KEY (https://site.financialmodelingprep.com). Works from cloud IPs.
+
+    Tries FMP's current `/stable/` endpoints first, then the legacy `/api/v3/` ones,
+    so it works regardless of which API surface the key is provisioned for."""
+    key = os.getenv("FMP_API_KEY")
+    if not key:
         return None
+
+    # ---- quote (price + P/E + market cap) ----
+    info = None
+    for url in (
+        f"https://financialmodelingprep.com/stable/quote?symbol={ticker}&apikey={key}",
+        f"https://financialmodelingprep.com/api/v3/quote/{ticker}?apikey={key}",
+    ):
+        try:
+            data = _fmp_get(url)
+            if isinstance(data, list) and data and data[0].get("price") is not None:
+                info = data[0]
+                break
+        except Exception:
+            continue
+    if info is None:
+        return None
+
+    # ---- 1-month price history (best-effort; chart still works without it) ----
+    closes: list[float] = []
+    for url in (
+        f"https://financialmodelingprep.com/stable/historical-price-eod/light?symbol={ticker}&apikey={key}",
+        f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?serietype=line&timeseries=30&apikey={key}",
+    ):
+        try:
+            raw = _fmp_get(url)
+            rows = raw.get("historical", raw) if isinstance(raw, dict) else raw
+            vals = []
+            for p in rows:
+                c = p.get("close", p.get("price"))
+                if c is not None:
+                    vals.append(float(c))
+            if len(vals) >= 5:
+                closes = list(reversed(vals[:30]))  # FMP returns newest-first
+                break
+        except Exception:
+            continue
+
+    if len(closes) >= 5:
+        change, vol = _stats_from_closes(closes)
+        history = [{"t": i, "close": round(c, 2)} for i, c in enumerate(closes)]
+    else:
+        change, vol = info.get("changesPercentage"), None
+        history = _synthetic(ticker)["price_history"]
+
+    return {
+        "source": "fmp",
+        "ticker": ticker.upper(),
+        "price": info.get("price"),
+        "change_pct_1m": change,
+        "pe_ratio": info.get("pe"),
+        "market_cap": info.get("marketCap"),
+        "beta": None,
+        "volatility_30d": vol,
+        "revenue_growth_yoy": None,
+        "profit_margin": None,
+        "price_history": history,
+    }
 
 
 def get_market_data(ticker: str) -> Dict[str, Any]:
