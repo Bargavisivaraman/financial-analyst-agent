@@ -11,3 +11,5 @@ services:
         sync: false            # set this secret in the Render dashboard
       - key: GROQ_MODEL
         value: llama-3.3-70b-versatile
+      - key: FMP_API_KEY
+        sync: false            # optional: free key from financialmodelingprep.com for reliable market data
