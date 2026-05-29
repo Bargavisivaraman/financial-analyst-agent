@@ -56,6 +56,11 @@
   .flag{font-size:11px;padding:3px 9px;border-radius:6px;background:#1a2230;color:var(--amber);border:1px solid #2a3346}
   .veto{color:var(--red);font-weight:700}
   .empty{color:var(--muted);font-size:13px}
+  .filings-src{font-size:12px;color:var(--muted);margin-bottom:8px}
+  .cites{margin-top:10px}
+  .cite{margin:5px 0;border:1px solid var(--border);border-radius:8px;background:#0c111b}
+  .cite summary{cursor:pointer;padding:7px 10px;font-size:12px;color:var(--accent2)}
+  .citebody{padding:8px 12px;font-size:12px;color:var(--muted);line-height:1.5;border-top:1px solid var(--border)}
 </style>
 </head>
 <body>
@@ -87,6 +92,7 @@
       <div class="card memo" id="memoCard" style="display:none">
         <h3>Risk &amp; Memo</h3>
         <div id="risk"></div>
+        <div class="body" id="filings" style="margin-bottom:14px"></div>
         <div class="body" id="memo"></div>
       </div>
     </div>
@@ -97,6 +103,7 @@ const AGENTS = [
   ["supervisor","Supervisor","orchestrates & routes"],
   ["market_data","Market Data","live price / valuation"],
   ["fundamental","Fundamental Analyst","growth & margins"],
+  ["filings","SEC Filings (RAG)","10-K retrieval"],
   ["news_sentiment","News & Sentiment","headline scoring"],
   ["risk_manager","Risk Manager","risk score · veto"],
   ["report_writer","Report Writer","final memo"],
@@ -148,6 +155,13 @@ function showRisk(r){
   requestAnimationFrame(()=>{document.querySelector('.fill').style.width=r.risk_score+'%';});
 }
 
+function showFilings(f){
+  const el=document.getElementById('filings');
+  const src = f.url ? `<a href="${f.url}" target="_blank" style="color:var(--accent2)">${f.source}</a>` : f.source;
+  const cites=(f.passages||[]).map((p,i)=>`<details class="cite"><summary>[${i+1}] 10-K passage</summary><div class="citebody">${p.slice(0,600)}…</div></details>`).join('');
+  el.innerHTML=`<div class="filings-src">📄 Grounded in 10-K · source: ${src}</div>${mdToHtml(f.analysis||'')}<div class="cites">${cites}</div>`;
+}
+
 let started=false;
 runBtn.onclick=()=>{
   const ticker=document.getElementById('ticker').value.trim()||'AAPL';
@@ -176,6 +190,7 @@ runBtn.onclick=()=>{
       document.getElementById('memoCard').style.display='block';
       if(ev.risk) showRisk(ev.risk);
       document.getElementById('memo').innerHTML=mdToHtml(ev.memo||'');
+      if(ev.filings) showFilings(ev.filings);
     } else if(ev.type==='done'){
       es.close(); started=false; runBtn.disabled=false;
     }

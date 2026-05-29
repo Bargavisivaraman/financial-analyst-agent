@@ -76,6 +76,58 @@ def complete(system: str, user: str, max_tokens: int = 1024, json_mode: bool = F
     return "".join(block.text for block in msg.content if block.type == "text").strip()
 
 
+def supports_tools() -> bool:
+    """Genuine LLM-driven tool-calling is available only on the Groq backend here."""
+    return _provider == "groq" and _client is not None
+
+
+def complete_with_tools(system, user, tools, dispatch, max_rounds=4, emit=None) -> str:
+    """Real agentic tool-calling loop: the LLM autonomously decides which tools to
+    invoke, we execute them and feed results back, repeating until it answers.
+
+    `tools`    — OpenAI-style tool schemas.
+    `dispatch` — callable(name, args_dict) -> JSON-serializable result.
+    Returns the model's final text. Raises if tools are unsupported (caller falls back).
+    """
+    if not supports_tools():
+        raise RuntimeError("tool-calling unsupported on this backend")
+
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    for _ in range(max_rounds):
+        resp = _client.chat.completions.create(
+            model=_model, messages=messages, tools=tools, tool_choice="auto", max_tokens=800
+        )
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            return (msg.content or "").strip()
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in msg.tool_calls
+                ],
+            }
+        )
+        for tc in msg.tool_calls:
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except Exception:
+                args = {}
+            if emit:
+                emit(f"LLM chose tool → {tc.function.name}({args})")
+            result = dispatch(tc.function.name, args)
+            messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result)[:4000]}
+            )
+
+    final = _client.chat.completions.create(model=_model, messages=messages, max_tokens=800)
+    return (final.choices[0].message.content or "").strip()
+
+
 def _mock(system: str, user: str, json_mode: bool) -> str:
     """Deterministic, plausible output keyed off the agent's role in the system
     prompt. Lets the multi-agent flow run with zero credentials."""
@@ -89,6 +141,13 @@ def _mock(system: str, user: str, json_mode: bool) -> str:
                 "flags": ["Elevated valuation vs. sector median", "Earnings call in <14 days"],
                 "rationale": "Volatility and beta are within normal range; no hard veto triggered.",
             }
+        )
+    if "filings" in role or "10-k" in role:
+        return (
+            "Per the filing, the company cites intense competition and supply-chain dependence as "
+            "primary risks [1], while revenue growth is attributed to strong product demand and "
+            "pricing [2]. Liquidity is described as adequate, with operating cash flow funding "
+            "capex and buybacks [4]. NEUTRAL"
         )
     if "fundamental" in role:
         return (

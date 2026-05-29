@@ -18,8 +18,12 @@ SYSTEM = (
 
 def run(state: Dict[str, Any], emit: Callable[[str, str], None]) -> Dict[str, Any]:
     ticker = state["ticker"]
-    emit(NAME, f"Fetching recent headlines for {ticker}…")
-    news = get_news(ticker)
+    if state.get("news_prefetched"):
+        emit(NAME, "Reusing headlines already fetched via tool-calling…")
+        news = state["news_prefetched"]
+    else:
+        emit(NAME, f"Fetching recent headlines for {ticker}…")
+        news = get_news(ticker)
     emit(NAME, f"Scoring sentiment over {len(news['headlines'])} headlines…")
     user = "Headlines:\n" + "\n".join(f"- {h}" for h in news["headlines"])
     summary = llm.complete(SYSTEM, user, max_tokens=400)

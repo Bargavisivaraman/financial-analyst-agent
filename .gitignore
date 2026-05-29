@@ -5,6 +5,7 @@ venv/
 .env
 .DS_Store
 *.log
+.cache/
 
 # editor / tooling configs
 .claude/

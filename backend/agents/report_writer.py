@@ -22,6 +22,7 @@ def run(state: Dict[str, Any], emit: Callable[[str, str], None]) -> Dict[str, An
     user = (
         f"Ticker: {state['ticker']}\n\n"
         f"FUNDAMENTALS:\n{state.get('fundamental','')}\n\n"
+        f"10-K FILING (grounded):\n{state.get('filings',{}).get('analysis','')}\n\n"
         f"NEWS/SENTIMENT:\n{state.get('news',{}).get('summary','')}\n\n"
         f"RISK: score={risk.get('risk_score')} band={risk.get('risk_band')} "
         f"veto={risk.get('veto')} flags={risk.get('flags')}"

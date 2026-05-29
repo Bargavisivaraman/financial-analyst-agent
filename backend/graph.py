@@ -12,7 +12,7 @@ import time
 from typing import Any, Callable, Dict, Iterator
 
 from . import llm
-from .agents import fundamental, market_data, news_sentiment, report_writer, risk_manager
+from .agents import filings, fundamental, market_data, news_sentiment, report_writer, risk_manager
 
 Emit = Callable[[str, str], None]
 
@@ -37,7 +37,7 @@ def run_analysis(ticker: str) -> Iterator[Dict[str, Any]]:
 
     mode = f"LIVE ({llm.PROVIDER}:{llm.MODEL})" if llm.live_mode() else "MOCK (no API key)"
     emit(SUPERVISOR, f"Received request for {state['ticker']}. LLM mode: {mode}.")
-    emit(SUPERVISOR, "Planning: market → fundamental → news → risk → report.")
+    emit(SUPERVISOR, "Planning: market → fundamental → filings(RAG) → news → risk → report.")
     yield from _flush(events)
 
     # Node 1: Market data (parallel-capable, sequential here for clear tracing)
@@ -56,7 +56,13 @@ def run_analysis(ticker: str) -> Iterator[Dict[str, Any]]:
         state.update(fundamental.run(state, emit))
     yield from _flush(events)
 
-    # Node 3: News & sentiment
+    # Node 3: SEC filings (RAG over 10-K)
+    emit(SUPERVISOR, "Dispatching → SEC Filings Agent (RAG over 10-K)")
+    yield from _flush(events)
+    state.update(filings.run(state, emit))
+    yield from _flush(events)
+
+    # Node 4: News & sentiment
     emit(SUPERVISOR, "Dispatching → News & Sentiment Agent")
     yield from _flush(events)
     state.update(news_sentiment.run(state, emit))
@@ -86,6 +92,7 @@ def run_analysis(ticker: str) -> Iterator[Dict[str, Any]]:
         "ticker": state["ticker"],
         "market": state.get("market"),
         "fundamental": state.get("fundamental"),
+        "filings": state.get("filings"),
         "news": state.get("news"),
         "risk": state.get("risk"),
         "memo": state.get("memo"),
