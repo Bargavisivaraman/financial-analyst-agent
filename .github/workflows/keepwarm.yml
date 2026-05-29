@@ -1,0 +1,45 @@
+name: Keep-warm and smoke test
+
+# Autonomous maintenance for the free-tier Render deployment:
+#  - keep-warm: pings the app every ~13 min so it never cold-starts (Render free
+#    services sleep after 15 min idle, costing 30-50s on the next visit).
+#  - smoke: once a day, runs a full analysis and fails if it doesn't complete.
+# Runs entirely on GitHub's infrastructure. No manual involvement needed.
+
+on:
+  schedule:
+    - cron: "*/13 * * * *"   # every 13 minutes (keep-warm)
+    - cron: "17 7 * * *"     # once daily at 07:17 UTC (smoke test)
+  workflow_dispatch: {}
+
+env:
+  APP_URL: https://financial-analyst-agent.onrender.com
+
+jobs:
+  keepwarm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 "$APP_URL/api/health") && break
+            echo "attempt $i failed, retrying…"; sleep 10
+          done
+          echo "health: HTTP $code"
+          test "$code" = "200"
+
+  smoke:
+    # only the daily 07:17 schedule (and manual runs) execute the full smoke test
+    if: github.event.schedule == '17 7 * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Full analysis must complete
+        run: |
+          echo "Running full analysis for AAPL…"
+          body=$(curl -s --max-time 170 "$APP_URL/api/analyze?ticker=AAPL")
+          echo "$body" | grep -q '"type": "result"' \
+            && echo "PASS: analysis reached a result" \
+            || (echo "FAIL: analysis did not complete"; echo "$body" | tail -5; exit 1)
+          echo "$body" | grep -q '"type": "done"' \
+            && echo "PASS: stream closed cleanly" \
+            || echo "WARN: no done event"

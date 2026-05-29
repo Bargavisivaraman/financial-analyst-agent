@@ -11,6 +11,29 @@ from __future__ import annotations
 
 import json
 import os
+import time
+
+
+def _is_transient(e: Exception) -> bool:
+    """Rate limits (429), server errors (5xx), and timeouts are worth retrying."""
+    s = str(e).lower()
+    return any(k in s for k in ("429", "rate limit", "ratelimit", "timeout", "timed out",
+                                "500", "502", "503", "504", "overloaded", "connection"))
+
+
+def _with_retry(fn, attempts: int = 4, base_delay: float = 1.0):
+    """Call fn(), retrying transient failures with exponential backoff. Re-raises
+    the last error if all attempts fail (caller decides how to degrade)."""
+    last = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            last = e
+            if not _is_transient(e) or i == attempts - 1:
+                raise
+            time.sleep(base_delay * (2 ** i))
+    raise last  # pragma: no cover
 
 # ---- backend selection -----------------------------------------------------
 _provider = "mock"
@@ -54,26 +77,38 @@ def complete(system: str, user: str, max_tokens: int = 1024, json_mode: bool = F
     if _client is None:
         return _mock(system, user, json_mode)
 
-    if _provider == "groq":
-        resp = _client.chat.completions.create(
-            model=_model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            **({"response_format": {"type": "json_object"}} if json_mode else {}),
-        )
-        return (resp.choices[0].message.content or "").strip()
+    try:
+        if _provider == "groq":
+            def _call():
+                return _client.chat.completions.create(
+                    model=_model,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    **({"response_format": {"type": "json_object"}} if json_mode else {}),
+                )
 
-    # anthropic
-    msg = _client.messages.create(
-        model=_model,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    return "".join(block.text for block in msg.content if block.type == "text").strip()
+            resp = _with_retry(_call)
+            return (resp.choices[0].message.content or "").strip()
+
+        # anthropic
+        def _acall():
+            return _client.messages.create(
+                model=_model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            )
+
+        msg = _with_retry(_acall)
+        return "".join(block.text for block in msg.content if block.type == "text").strip()
+    except Exception:
+        # Persistent failure (e.g. sustained rate limiting): degrade gracefully to a
+        # deterministic response so the multi-agent run still COMPLETES instead of
+        # crashing the SSE stream mid-analysis.
+        return _mock(system, user, json_mode)
 
 
 def supports_tools() -> bool:
@@ -93,16 +128,18 @@ def complete_with_tools(system, user, tools, dispatch, max_rounds=4, emit=None) 
         raise RuntimeError("tool-calling unsupported on this backend")
 
     def _create(**kw):
-        # Llama-on-Groq intermittently emits a malformed tool call (tool_use_failed);
-        # it's transient, so retry a couple times before giving up.
+        # Retry transient failures: Llama-on-Groq intermittently emits a malformed
+        # tool call (tool_use_failed), and the free tier rate-limits (429).
         last = None
-        for attempt in range(3):
+        for attempt in range(4):
             try:
                 return _client.chat.completions.create(**kw)
             except Exception as e:  # noqa: BLE001
                 last = e
-                if "tool_use_failed" not in str(e) and "400" not in str(e):
+                retryable = "tool_use_failed" in str(e) or "400" in str(e) or _is_transient(e)
+                if not retryable or attempt == 3:
                     raise
+                time.sleep(1.0 * (2 ** attempt))
         raise last
 
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from typing import Any, Dict, List
 
 
@@ -40,7 +41,15 @@ def _synthetic(ticker: str) -> Dict[str, Any]:
     }
 
 
-def get_market_data(ticker: str) -> Dict[str, Any]:
+# yfinance is blocked/rate-limited from many datacenter IPs (e.g. Render). After it
+# fails once in a given process we stop trying so we don't pay a timeout every request.
+_YF_DISABLED = False
+
+
+def _try_yfinance(ticker: str) -> Dict[str, Any] | None:
+    global _YF_DISABLED
+    if _YF_DISABLED:
+        return None
     try:
         import yfinance as yf
 
@@ -49,14 +58,10 @@ def get_market_data(ticker: str) -> Dict[str, Any]:
         if not info or info.get("regularMarketPrice") is None:
             raise ValueError("empty info")
         hist = t.history(period="1mo")
-        change = 0.0
-        history: List[Dict[str, Any]] = []
+        change, history = 0.0, []
         if len(hist) > 1:
-            change = round(
-                (hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100, 2
-            )
-            closes = hist["Close"].tolist()
-            history = [{"t": i, "close": round(c, 2)} for i, c in enumerate(closes)]
+            change = round((hist["Close"].iloc[-1] - hist["Close"].iloc[0]) / hist["Close"].iloc[0] * 100, 2)
+            history = [{"t": i, "close": round(c, 2)} for i, c in enumerate(hist["Close"].tolist())]
         return {
             "source": "yfinance",
             "ticker": ticker.upper(),
@@ -71,7 +76,96 @@ def get_market_data(ticker: str) -> Dict[str, Any]:
             "price_history": history or _synthetic(ticker)["price_history"],
         }
     except Exception:
-        return _synthetic(ticker)
+        _YF_DISABLED = True
+        return None
+
+
+def _stats_from_closes(closes: List[float]) -> tuple[float, float]:
+    change = round((closes[-1] - closes[0]) / closes[0] * 100, 2)
+    rets = [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
+    mean = sum(rets) / len(rets) if rets else 0.0
+    vol = round((sum((r - mean) ** 2 for r in rets) / len(rets)) ** 0.5, 4) if rets else None
+    return change, vol
+
+
+def _try_yahoo_chart(ticker: str) -> Dict[str, Any] | None:
+    """Real price + 1M history from Yahoo's public v8 chart endpoint (no key). This is a
+    different endpoint than the one yfinance uses, so it often works from cloud IPs where
+    yfinance is blocked. Fundamentals (P/E, beta) aren't here, so they stay null."""
+    import json
+    import urllib.request
+
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1mo&interval=1d"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        d = json.loads(urllib.request.urlopen(req, timeout=8).read())
+        res = d["chart"]["result"][0]
+        meta = res["meta"]
+        closes = [c for c in res["indicators"]["quote"][0]["close"] if c is not None]
+        if len(closes) < 5:
+            return None
+        change, vol = _stats_from_closes(closes)
+        return {
+            "source": "yahoo",
+            "ticker": ticker.upper(),
+            "price": round(meta.get("regularMarketPrice", closes[-1]), 2),
+            "change_pct_1m": change,
+            "pe_ratio": None,
+            "market_cap": None,
+            "beta": None,
+            "volatility_30d": vol,
+            "revenue_growth_yoy": None,
+            "profit_margin": None,
+            "price_history": [{"t": i, "close": round(c, 2)} for i, c in enumerate(closes)],
+        }
+    except Exception:
+        return None
+
+
+def _try_fmp(ticker: str) -> Dict[str, Any] | None:
+    """Full real data (price + fundamentals) from Financial Modeling Prep. Requires a
+    free FMP_API_KEY (https://site.financialmodelingprep.com). Works from cloud IPs."""
+    key = os.getenv("FMP_API_KEY")
+    if not key:
+        return None
+    import json
+    import urllib.request
+
+    base = "https://financialmodelingprep.com/api/v3"
+    try:
+        q = json.loads(urllib.request.urlopen(f"{base}/quote/{ticker}?apikey={key}", timeout=8).read())
+        if not q:
+            return None
+        info = q[0]
+        hist_raw = json.loads(
+            urllib.request.urlopen(
+                f"{base}/historical-price-full/{ticker}?serietype=line&timeseries=30&apikey={key}", timeout=8
+            ).read()
+        )
+        closes = [p["close"] for p in reversed(hist_raw.get("historical", []))]
+        change, vol = _stats_from_closes(closes) if len(closes) >= 5 else (info.get("changesPercentage"), None)
+        return {
+            "source": "fmp",
+            "ticker": ticker.upper(),
+            "price": info.get("price"),
+            "change_pct_1m": change,
+            "pe_ratio": info.get("pe"),
+            "market_cap": info.get("marketCap"),
+            "beta": None,
+            "volatility_30d": vol,
+            "revenue_growth_yoy": None,
+            "profit_margin": None,
+            "price_history": [{"t": i, "close": round(c, 2)} for i, c in enumerate(closes)] or _synthetic(ticker)["price_history"],
+        }
+    except Exception:
+        return None
+
+
+def get_market_data(ticker: str) -> Dict[str, Any]:
+    """Real data with graceful degradation:
+    FMP (full, needs free key) -> yfinance (full, local) -> Yahoo chart (real price, no key)
+    -> deterministic synthetic (last resort, always works)."""
+    return _try_fmp(ticker) or _try_yfinance(ticker) or _try_yahoo_chart(ticker) or _synthetic(ticker)
 
 
 def get_news(ticker: str, limit: int = 5) -> Dict[str, Any]:

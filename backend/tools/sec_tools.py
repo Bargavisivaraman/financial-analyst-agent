@@ -27,16 +27,21 @@ _FALLBACK = (
 )
 
 
-def _get(url: str) -> bytes:
-    return urllib.request.urlopen(urllib.request.Request(url, headers=_UA), timeout=15).read()
+def _get(url: str, timeout: int = 12) -> bytes:
+    return urllib.request.urlopen(urllib.request.Request(url, headers=_UA), timeout=timeout).read()
+
+
+# The ticker->CIK map (~1MB) is identical for every request, so fetch it once per
+# process and keep it in memory instead of re-downloading it on every analysis.
+_CIK_MAP: dict | None = None
 
 
 def _cik_for(ticker: str) -> Optional[str]:
-    data = json.loads(_get("https://www.sec.gov/files/company_tickers.json"))
-    for row in data.values():
-        if row["ticker"].upper() == ticker.upper():
-            return str(row["cik_str"]).zfill(10)
-    return None
+    global _CIK_MAP
+    if _CIK_MAP is None:
+        data = json.loads(_get("https://www.sec.gov/files/company_tickers.json"))
+        _CIK_MAP = {row["ticker"].upper(): str(row["cik_str"]).zfill(10) for row in data.values()}
+    return _CIK_MAP.get(ticker.upper())
 
 
 def _latest_10k_url(cik: str) -> Optional[str]:
