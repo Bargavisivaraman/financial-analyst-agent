@@ -3,8 +3,12 @@ import { mdToHtml } from "../format";
 
 function callFromMemo(memo: string): { call: string; color: string } {
   const m = memo.toUpperCase();
-  if (m.includes("SELL") || m.includes("AVOID")) return { call: "SELL", color: "#f87171" };
-  if (m.includes("BUY")) return { call: "BUY", color: "#34d399" };
+  // Prefer the explicit recommendation line; else the first call word in the text.
+  // (Bare includes() mislabeled "HOLD (lean Buy)" as BUY and "do not sell" as SELL.)
+  const rec = m.match(/RECOMMENDATION[\s\S]{0,40}?\b(BUY|SELL|HOLD|AVOID)\b/);
+  const call = rec?.[1] ?? m.match(/\b(BUY|SELL|HOLD|AVOID)\b/)?.[1] ?? "HOLD";
+  if (call === "SELL" || call === "AVOID") return { call: "SELL", color: "#f87171" };
+  if (call === "BUY") return { call: "BUY", color: "#34d399" };
   return { call: "HOLD", color: "#fbbf24" };
 }
 

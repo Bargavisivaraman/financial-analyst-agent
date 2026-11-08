@@ -24,6 +24,7 @@ export function fmtNum(n: number | null, suffix = ""): string {
 
 export function fmtPct(n: number | null): string {
   if (n === null || n === undefined) return "—";
-  const v = Math.abs(n) < 1 ? n * 100 : n; // handle ratios vs already-percent
-  return `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+  // The backend always sends already-percent values (e.g. 0.4 means +0.4%),
+  // so never rescale: a quiet +0.4% month must not render as +40%.
+  return `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
 }
