@@ -221,7 +221,12 @@ def get_news(ticker: str, limit: int = 5) -> Dict[str, Any]:
         import yfinance as yf
 
         items = yf.Ticker(ticker).news or []
-        headlines = [n.get("title") for n in items[:limit] if n.get("title")]
+        # yfinance >= 0.2.50 nests article fields under "content"; older versions are flat.
+        headlines = []
+        for n in items[:limit]:
+            title = n.get("title") or (n.get("content") or {}).get("title")
+            if title:
+                headlines.append(title)
         if headlines:
             return {"source": "yfinance", "ticker": ticker.upper(), "headlines": headlines}
         raise ValueError("no news")
