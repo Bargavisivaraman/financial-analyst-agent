@@ -37,6 +37,10 @@ def chunk_text(text: str, size: int = 1200, overlap: int = 200) -> List[str]:
         if end >= len(text):
             break
         i = end - overlap
+        # re-align to the next word boundary so chunks don't start mid-word ("tem 1A. Risk…")
+        sp = text.find(" ", i)
+        if sp != -1 and sp < end:
+            i = sp + 1
     return [c for c in chunks if len(c) > 80]
 
 
