@@ -35,6 +35,38 @@ def _with_retry(fn, attempts: int = 4, base_delay: float = 1.0):
             time.sleep(base_delay * (2 ** i))
     raise last  # pragma: no cover
 
+
+# Groq retires ("decommissions") model ids over time; calls then fail with 404
+# model_not_found. Instead of silently degrading every call to mock while
+# /api/health still claims LIVE, resolve a currently-served model and switch.
+_PREFERRED_MODELS = (
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "moonshotai/kimi-k2-instruct",
+)
+_NON_CHAT = ("whisper", "tts", "guard", "embed", "moderation", "compound", "allam")
+
+
+def _is_model_gone(e: Exception) -> bool:
+    s = str(e).lower()
+    return "model_not_found" in s or "decommissioned" in s or ("404" in s and "model" in s)
+
+
+def _resolve_model() -> str | None:
+    """Pick a live chat model from the provider's catalog and switch to it."""
+    global _model, MODEL
+    try:
+        ids = [m.id for m in _client.models.list().data]
+    except Exception:
+        return None
+    chat = [i for i in ids if not any(k in i.lower() for k in _NON_CHAT)]
+    pick = next((p for p in _PREFERRED_MODELS if p in chat), None) or (sorted(chat)[0] if chat else None)
+    if pick:
+        _model = MODEL = pick  # MODEL too, so /api/health reports the real model
+    return pick
+
 # ---- backend selection -----------------------------------------------------
 _provider = "mock"
 _model = "deterministic-mock"
@@ -90,7 +122,12 @@ def complete(system: str, user: str, max_tokens: int = 1024, json_mode: bool = F
                     **({"response_format": {"type": "json_object"}} if json_mode else {}),
                 )
 
-            resp = _with_retry(_call)
+            try:
+                resp = _with_retry(_call)
+            except Exception as e:
+                if not (_is_model_gone(e) and _resolve_model()):
+                    raise
+                resp = _with_retry(_call)  # retry once on the resolved model
             return (resp.choices[0].message.content or "").strip()
 
         # anthropic
@@ -136,6 +173,9 @@ def complete_with_tools(system, user, tools, dispatch, max_rounds=4, emit=None) 
                 return _client.chat.completions.create(**kw)
             except Exception as e:  # noqa: BLE001
                 last = e
+                if _is_model_gone(e) and _resolve_model():
+                    kw["model"] = _model  # pinned model was retired; retry on the resolved one
+                    continue
                 retryable = "tool_use_failed" in str(e) or "400" in str(e) or _is_transient(e)
                 if not retryable or attempt == 3:
                     raise
