@@ -9,7 +9,10 @@ from ..tools import get_news
 
 
 def _extract_score(text: str) -> float:
-    m = re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", text.split("sentiment")[-1]) if "sentiment" in text.lower() else []
+    # Split case-insensitively so "Net Sentiment: X" scopes the search like "net sentiment: X";
+    # otherwise we'd scan the whole text and pick up an unrelated number.
+    tail = re.split(r"sentiment", text, flags=re.IGNORECASE)[-1]
+    m = re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", tail) if "sentiment" in text.lower() else []
     for tok in m:
         try:
             v = float(tok)
