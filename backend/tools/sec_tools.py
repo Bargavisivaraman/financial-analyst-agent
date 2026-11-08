@@ -6,6 +6,7 @@ excerpt so the RAG path always produces output.
 """
 from __future__ import annotations
 
+import html as html_mod
 import json
 import re
 import urllib.request
@@ -57,10 +58,8 @@ def _latest_10k_url(cik: str) -> Optional[str]:
 def _strip_html(html: str) -> str:
     html = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
     text = re.sub(r"(?s)<[^>]+>", " ", html)
-    text = (
-        text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&#160;", " ")
-        .replace("&#39;", "'").replace("&rsquo;", "'").replace("&ldquo;", '"').replace("&rdquo;", '"')
-    )
+    # Decode ALL entities (named + numeric) — filings are littered with &#8217;, &#8220;, etc.
+    text = html_mod.unescape(text)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -82,7 +81,9 @@ def get_10k_text(ticker: str, max_chars: int = 120_000) -> dict:
             raise ValueError("filing text too short")
         result = {"source": "sec_edgar", "ticker": ticker.upper(), "url": url, "text": text}
     except Exception as e:
-        result = {
+        # Don't cache failures: a transient EDGAR hiccup would otherwise pin the
+        # generic fallback excerpt to this ticker for good.
+        return {
             "source": f"fallback ({type(e).__name__})",
             "ticker": ticker.upper(),
             "url": None,
