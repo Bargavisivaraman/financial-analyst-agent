@@ -27,7 +27,7 @@ def main() -> None:
         dt = time.time() - t0
         total_t += dt
         risk = r.get("risk", {})
-        ok = all(r.get(k) for k in ("market", "fundamental", "news", "risk", "memo"))
+        ok = all(r.get(k) for k in ("market", "fundamental", "filings", "news", "risk", "memo"))
         vetoes += 1 if risk.get("veto") else 0
         rows.append((tk, "PASS" if ok else "FAIL", risk.get("risk_score"), risk.get("risk_band"), round(dt, 2)))
 
