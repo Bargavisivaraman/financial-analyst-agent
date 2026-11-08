@@ -43,10 +43,20 @@ def run(state: Dict[str, Any], emit: Callable[[str, str], None]) -> Dict[str, An
     raw = llm.complete(SYSTEM, user, max_tokens=400, json_mode=True)
     try:
         risk = json.loads(raw)
+        if not isinstance(risk, dict):
+            raise ValueError("expected a JSON object")
     except Exception:
         risk = {"risk_score": quant, "risk_band": "Moderate", "veto": False, "flags": [], "rationale": raw}
-    # Blend LLM judgment with the deterministic floor.
-    risk["risk_score"] = int((risk.get("risk_score", quant) + quant) / 2)
+    # Blend LLM judgment with the deterministic floor. json_mode guarantees valid JSON,
+    # not the schema — coerce types so e.g. risk_score="42" can't crash the SSE stream.
+    try:
+        llm_score = float(risk.get("risk_score", quant))
+    except (TypeError, ValueError):
+        llm_score = quant
+    risk["risk_score"] = int((llm_score + quant) / 2)
+    if not isinstance(risk.get("flags"), list):
+        risk["flags"] = [str(risk["flags"])] if risk.get("flags") else []
+    risk["veto"] = bool(risk.get("veto"))
     if risk["risk_score"] >= 80:
         risk["veto"] = True
     verdict = "VETO" if risk.get("veto") else "cleared"
